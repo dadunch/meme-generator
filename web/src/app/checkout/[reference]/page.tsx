@@ -6,6 +6,7 @@
 
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -16,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { useConfirmPayment } from "@/lib/queries";
+import { describeError } from "@/lib/errors";
 
 function formatIdr(n: number) {
   return new Intl.NumberFormat("id-ID", {
@@ -29,13 +31,15 @@ export default function CheckoutPage() {
   const { reference } = useParams<{ reference: string }>();
   const router = useRouter();
   const confirm = useConfirmPayment();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const onPay = async () => {
+    setErrorMessage(null);
     try {
       await confirm.mutateAsync(reference);
       setTimeout(() => router.push("/pricing"), 1200);
-    } catch {
-      // BUG: error sengaja ditelan — gagal bayar tidak menampilkan apa-apa.
+    } catch (err) {
+      setErrorMessage(describeError(err));
     }
   };
 
@@ -53,6 +57,11 @@ export default function CheckoutPage() {
             <span className="text-muted-foreground">Referensi</span>
             <span className="font-mono">{reference}</span>
           </div>
+          {errorMessage ? (
+            <p className="rounded-md bg-destructive/15 p-3 text-sm text-destructive">
+              {errorMessage}
+            </p>
+          ) : null}
           {confirm.data ? (
             <p className="text-center text-sm font-medium text-green-600">
               ✅ Pembayaran berhasil! Langganan Anda aktif. Mengalihkan…
@@ -60,10 +69,18 @@ export default function CheckoutPage() {
           ) : null}
         </CardContent>
         <CardFooter className="flex gap-2">
-          <Button className="flex-1" onClick={onPay}>
-            {confirm.data ? "Lunas" : "Bayar Sekarang (Simulasi)"}
+          <Button
+            className="flex-1"
+            onClick={onPay}
+            disabled={confirm.isPending || !!confirm.data}
+          >
+            {confirm.isPending
+              ? "Memproses…"
+              : confirm.data
+              ? "Lunas"
+              : "Bayar Sekarang (Simulasi)"}
           </Button>
-          <Button asChild variant="ghost">
+          <Button asChild variant="ghost" disabled={confirm.isPending}>
             <Link href="/pricing">Batal</Link>
           </Button>
         </CardFooter>
