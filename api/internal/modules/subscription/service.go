@@ -42,13 +42,19 @@ func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, 
 	} else if ok {
 		return prev, nil
 	}
-
+	
 	plan, err := s.repo.GetPlanByCode(ctx, dto.PlanCode)
 	if err != nil {
 		return CheckoutResponse{}, err
 	}
 	if _, _, err := s.repo.ActiveByUser(ctx, userID); err == nil {
 		return CheckoutResponse{}, ErrAlreadySubscribed
+	}
+
+	if prev, ok, err := s.repo.CheckTagihanAktif(ctx, userID, plan); err != nil {
+		return CheckoutResponse{}, err
+	} else if ok {
+		return prev, nil
 	}
 
 	reference := token.RandomHex(12)
