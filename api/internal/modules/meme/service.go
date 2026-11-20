@@ -32,14 +32,21 @@ func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig,
 
 // PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
 // untuk mengunggah gambar dasar langsung ke S3/Garage.
-func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string) (UploadResponse, error) {
+func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, size int64) (UploadResponse, error) {
 	if err := s.gate.CanCreate(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
-	// BUG: tidak ada allowlist ekstensi dan tidak ada batas ukuran file.
-	// Semua tipe file lolos (pdf, zip, html, exe) dan presigned PUT tanpa
-	// Content-Length berarti ukurannya tak terbatas. Fix: validasi ext
-	// (allowedExt) + batas ukuran di presign/handler.
+	if !allowedExt(ext) {
+		return UploadResponse{}, ErrInvalidFile
+	}
+	mime := mimeFromExt(ext)
+	if mime == "" {
+		return UploadResponse{}, ErrInvalidFile
+	}
+	if size > maxUploadSizeBytes {
+		return UploadResponse{}, ErrFileTooLarge
+	}
+
 	objectKey := fmt.Sprintf("base/%s%s", token.RandomHex(12), strings.ToLower(ext))
 
 	m, err := s.repo.Create(ctx, Meme{
@@ -51,11 +58,13 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 	}
 
 	presign := s3.NewPresignClient(s.s3)
-	input := &s3.PutObjectInput{Bucket: &s.bucket, Key: &objectKey}
-	// ContentType diambil mentah dari klien tanpa validasi allowlist —
-	// klien bisa memilih text/html dsb.
-	if contentType != "" {
-		input.ContentType = &contentType
+	input := &s3.PutObjectInput{
+		Bucket:      &s.bucket,
+		Key:         &objectKey,
+		ContentType: &mime,
+	}
+	if size > 0 {
+		input.ContentLength = &size
 	}
 	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
@@ -122,4 +131,18 @@ func allowedExt(ext string) bool {
 		return true
 	}
 	return false
+}
+
+func mimeFromExt(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	}
+	return ""
 }
