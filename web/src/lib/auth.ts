@@ -55,10 +55,20 @@ export function useLogin() {
 export function useLogout() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => api.post("/api/v1/auth/logout"),
-    onSuccess: () => {
+    mutationFn: async () => {
+      try {
+        await api.post("/api/v1/auth/logout");
+      } catch (err) {
+        // Abaikan error jaringan/server agar frontend tetap logout
+        console.error("Gagal memanggil API logout:", err);
+      }
+    },
+    onSettled: () => {
+      // Hapus cookie sisi client juga sebagai fallback
+      document.cookie = "meme_access_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      document.cookie = "meme_refresh_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       qc.clear();
-      window.location.href = "/";
+      window.location.href = "/login";
     },
   });
 }
