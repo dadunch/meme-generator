@@ -33,9 +33,8 @@ export function useSubscriptionStatus() {
     queryKey: queryKeys.subscription,
     queryFn: async () =>
       unwrap<SubscriptionStatus>(await api.get("/api/v1/subscription/status")),
-    // BUG: status dianggap abadi — setelah beli/expired, UI tidak pernah
-    // mengambil ulang sampai invalidate manual / reload penuh.
-    staleTime: Number.POSITIVE_INFINITY,
+    staleTime: 30 * 1000, // 30 detik
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -103,7 +102,10 @@ export function useCompleteMeme() {
           resultUrl: input.resultUrl,
         }),
       ),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["memes"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["memes"] });
+      qc.invalidateQueries({ queryKey: queryKeys.subscription });
+    },
   });
 }
 
