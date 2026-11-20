@@ -120,6 +120,12 @@ ensure-air:
 infra-up:
 	docker compose up -d --wait postgres redis garage
 	@printf '\n[infra] bucket $(S3_BUCKET) dipakai via GARAGE_DEFAULT_BUCKET.\n'
+	@printf '[infra] menerapkan CORS policy ke bucket $(S3_BUCKET)...\n'
+	@AWS_ACCESS_KEY_ID=$(S3_ACCESS_KEY) AWS_SECRET_ACCESS_KEY=$(S3_SECRET_KEY) \
+		aws --endpoint-url http://localhost:$(S3_PORT) --region $(S3_REGION) \
+		s3api put-bucket-cors --bucket $(S3_BUCKET) \
+		--cors-configuration file://docker/cors.json 2>/dev/null \
+	|| printf '[infra] PERINGATAN: gagal set CORS (aws cli belum terinstall?)\n'
 
 infra-down:
 	docker compose down
