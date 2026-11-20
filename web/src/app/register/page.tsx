@@ -16,7 +16,6 @@ export default function RegisterPage() {
   const router = useRouter();
   const register = useRegister();
 
-  // BUG: sama seperti /login — cookie ada → lempar ke halaman utama.
   useEffect(() => {
     if (document.cookie.includes("meme_access_token")) {
       router.replace("/");

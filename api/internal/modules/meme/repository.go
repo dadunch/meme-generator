@@ -91,7 +91,7 @@ func (r *Repository) ListByUser(ctx context.Context, userID string, limit, offse
 }
 
 func (r *Repository) Delete(ctx context.Context, id, userID string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM memes WHERE id = $1`, id)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM memes WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("meme repository: delete gagal: %w", err)
 	}

@@ -16,8 +16,7 @@ export default function LoginPage() {
   const router = useRouter();
   const login = useLogin();
 
-  // BUG: kalau cookie auth masih ada (misal logout gagal menghapusnya),
-  // langsung dilempar ke halaman utama — memicu redirect bolak-balik.
+ 
   useEffect(() => {
     if (document.cookie.includes("meme_access_token")) {
       router.replace("/");
