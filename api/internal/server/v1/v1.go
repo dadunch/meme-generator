@@ -20,10 +20,23 @@ import (
 
 // subscriptionGate mengadaptasi subscription.Service ke meme.Gate.
 type subscriptionGate struct {
-	sub *subscription.Service
+	sub  *subscription.Service
+	pool *pgxpool.Pool
 }
 
 func (g subscriptionGate) CanCreate(ctx context.Context, userID string) error {
+	tx, err := g.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Kunci advisory berbasis user ID selama transaksi untuk mencegah race condition (TKT-109)
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, userID).Scan(&locked); err != nil {
+		return err
+	}
+
 	status, err := g.sub.Status(ctx, userID)
 	if err != nil {
 		return err
@@ -34,6 +47,8 @@ func (g subscriptionGate) CanCreate(ctx context.Context, userID string) error {
 	if status.MaxMemes > 0 && status.MemesUsed >= status.MaxMemes {
 		return meme.ErrNotSubscribedGate
 	}
+
+	_ = tx.Commit(ctx)
 	return nil
 }
 
@@ -44,7 +59,7 @@ func Mount(mux *http.ServeMux, pool *pgxpool.Pool, rdb *redis.Client, s3Client *
 	subHandler := subscription.NewModule(pool)
 	subSvc := subscription.NewService(subscription.NewPostgresRepository(pool), subscription.MockGateway{})
 
-	memeHandler := meme.NewModule(pool, s3Client, cfg.Storage, subscriptionGate{sub: subSvc})
+	memeHandler := meme.NewModule(pool, s3Client, cfg.Storage, subscriptionGate{sub: subSvc, pool: pool})
 
 	auth.RegisterRoutes(mux, authHandler, authMW)
 	subscription.RegisterRoutes(mux, subHandler, authMW)
