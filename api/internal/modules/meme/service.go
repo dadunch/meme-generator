@@ -3,9 +3,12 @@ package meme
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"path"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
 	"github.com/nyxsr/meme-portal/api/internal/config"
@@ -36,11 +39,11 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 	if err := s.gate.CanCreate(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
-	if !allowedExt(ext) {
-		return UploadResponse{}, ErrInvalidFile
-	}
 	mime := mimeFromExt(ext)
 	if mime == "" {
+		return UploadResponse{}, ErrInvalidFile
+	}
+	if size <= 0 {
 		return UploadResponse{}, ErrInvalidFile
 	}
 	if size > maxUploadSizeBytes {
@@ -58,15 +61,12 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 	}
 
 	presign := s3.NewPresignClient(s.s3)
-	input := &s3.PutObjectInput{
-		Bucket:      &s.bucket,
-		Key:         &objectKey,
-		ContentType: &mime,
-	}
-	if size > 0 {
-		input.ContentLength = &size
-	}
-	req, err := presign.PresignPutObject(ctx, input, s3.WithPresignExpires(maxPresignTTL))
+	req, err := presign.PresignPutObject(ctx, &s3.PutObjectInput{
+		Bucket:        &s.bucket,
+		Key:           &objectKey,
+		ContentType:   &mime,
+		ContentLength: &size,
+	}, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
 		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
 	}
@@ -75,20 +75,27 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 
 // ResultUpload mengembalikan presigned PUT URL untuk gambar hasil render
 // (canvas) milik meme <id>; complete kemudian menyimpan URL publiknya.
-func (s *Service) ResultUpload(ctx context.Context, userID, id string) (UploadResponse, error) {
+func (s *Service) ResultUpload(ctx context.Context, userID, id string, size int64) (UploadResponse, error) {
 	if err := s.gate.CanCreate(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
 	if _, err := s.repo.GetByID(ctx, id, userID); err != nil {
 		return UploadResponse{}, err
 	}
+	if size <= 0 {
+		return UploadResponse{}, ErrInvalidFile
+	}
+	if size > maxResultSizeBytes {
+		return UploadResponse{}, ErrFileTooLarge
+	}
 	objectKey := fmt.Sprintf("result/%s.png", id)
 
 	presign := s3.NewPresignClient(s.s3)
 	req, err := presign.PresignPutObject(ctx, &s3.PutObjectInput{
-		Bucket:      &s.bucket,
-		Key:         &objectKey,
-		ContentType: &[]string{"image/png"}[0],
+		Bucket:        &s.bucket,
+		Key:           &objectKey,
+		ContentType:   aws.String("image/png"),
+		ContentLength: &size,
 	}, s3.WithPresignExpires(maxPresignTTL))
 	if err != nil {
 		return UploadResponse{}, fmt.Errorf("meme service: presign gagal: %w", err)
@@ -96,11 +103,33 @@ func (s *Service) ResultUpload(ctx context.Context, userID, id string) (UploadRe
 	return UploadResponse{ID: id, UploadURL: req.URL, BaseURL: s.publicURL(objectKey)}, nil
 }
 
-func (s *Service) Complete(ctx context.Context, userID, id, resultURL string) (Meme, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
-		return Meme{}, err
-	}
-	return s.repo.SetResultURL(ctx, id, userID, resultURL)
+func (s *Service) Complete(ctx context.Context, userID, id string) (Meme, error) {
+    if err := s.gate.CanCreate(ctx, userID); err != nil { return Meme{}, err }
+    if _, err := s.repo.GetByID(ctx, id, userID); err != nil { return Meme{}, err }
+
+    key := fmt.Sprintf("result/%s.png", id)
+    drop := func() {
+        _, _ = s.s3.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &key})
+    }
+
+    head, err := s.s3.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &key})
+    if err != nil { return Meme{}, ErrInvalidFile }
+    if aws.ToInt64(head.ContentLength) > maxResultSizeBytes {
+        drop()
+        return Meme{}, ErrFileTooLarge
+    }
+
+    obj, err := s.s3.GetObject(ctx, &s3.GetObjectInput{
+        Bucket: &s.bucket, Key: &key, Range: aws.String("bytes=0-511"),
+    })
+    if err != nil { return Meme{}, ErrInvalidFile }
+    defer obj.Body.Close()
+    buf, _ := io.ReadAll(obj.Body)
+    if http.DetectContentType(buf) != "image/png" {
+        drop()
+        return Meme{}, ErrInvalidFile
+    }
+    return s.repo.SetResultURL(ctx, id, userID, s.publicURL(key))
 }
 
 func (s *Service) List(ctx context.Context, userID string, limit, offset int32) (ListResponse, error) {
