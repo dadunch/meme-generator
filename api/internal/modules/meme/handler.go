@@ -84,13 +84,7 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
 		return
 	}
-	id := r.PathValue("id")
-	var dto completeDTO
-	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil || dto.ResultURL == "" {
-		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "resultUrl wajib diisi")
-		return
-	}
-	m, err := h.service.Complete(r.Context(), userID, id, dto.ResultURL)
+	m, err := h.service.Complete(r.Context(), userID, r.PathValue("id"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -135,6 +129,8 @@ func writeError(w http.ResponseWriter, err error) {
 		response.Error(w, http.StatusRequestEntityTooLarge, response.CodeUploadTooLarge, err.Error())
 	case errors.Is(err, ErrNotFound):
 		response.Error(w, http.StatusNotFound, response.CodeMemeNotFound, err.Error())
+	case errors.Is(err, ErrQuotaExceeded):
+		response.Error(w, http.StatusForbidden, response.CodeNotSubscribed, err.Error())
 	case errors.Is(err, ErrNotSubscribedGate):
 		response.Error(w, http.StatusForbidden, response.CodeNotSubscribed, ErrNotSubscribedGate.Error())
 	default:

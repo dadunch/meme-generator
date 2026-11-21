@@ -42,7 +42,7 @@ func (s *Service) Checkout(ctx context.Context, userID string, dto CheckoutDTO, 
 	} else if ok {
 		return prev, nil
 	}
-	
+
 	plan, err := s.repo.GetPlanByCode(ctx, dto.PlanCode)
 	if err != nil {
 		return CheckoutResponse{}, err
@@ -83,7 +83,11 @@ func (s *Service) MarkExpired(ctx context.Context) (int64, error) {
 func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus, error) {
 	sub, plan, err := s.repo.ActiveByUser(ctx, userID)
 	if err == nil {
-		used, err := s.repo.MemesUsed(ctx, userID, time.Now().AddDate(0, 0, -int(plan.Duration)))
+		since := time.Now().AddDate(0, 0, -int(plan.Duration)) // fallback
+		if sub.StartsAt != nil {
+			since = *sub.StartsAt
+		}
+		used, err := s.repo.MemesUsed(ctx, userID, since)
 		if err != nil {
 			return SubscriptionStatus{}, err
 		}
@@ -98,6 +102,7 @@ func (s *Service) Status(ctx context.Context, userID string) (SubscriptionStatus
 			PlanCode:   plan.Code,
 			PlanName:   plan.Name,
 			EndsAt:     endsAt,
+			StartsAt:   since,
 			MemesUsed:  used,
 			MaxMemes:   plan.MaxMemes,
 		}, nil

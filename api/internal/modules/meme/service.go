@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -17,8 +18,13 @@ import (
 
 // Gate memeriksa apakah user berhak membuat meme (langganan aktif).
 // Diimplementasikan oleh modul subscription lewat structural typing.
+type Allowance struct {
+	Max   int       // 0 = tanpa batas
+	Since time.Time // awal periode hitung
+}
+
 type Gate interface {
-	CanCreate(ctx context.Context, userID string) error
+	CanCreate(ctx context.Context, userID string) (Allowance, error)
 }
 
 type Service struct {
@@ -36,14 +42,12 @@ func NewService(repo *Repository, s3Client *s3.Client, cfg config.StorageConfig,
 // PrepareUpload membuat record meme (pending) dan mengembalikan presigned PUT URL
 // untuk mengunggah gambar dasar langsung ke S3/Garage.
 func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, contentType string, size int64) (UploadResponse, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
+	allow, err := s.gate.CanCreate(ctx, userID)
+	if err != nil {
 		return UploadResponse{}, err
 	}
 	mime := mimeFromExt(ext)
-	if mime == "" {
-		return UploadResponse{}, ErrInvalidFile
-	}
-	if size <= 0 {
+	if mime == "" || size <= 0 {
 		return UploadResponse{}, ErrInvalidFile
 	}
 	if size > maxUploadSizeBytes {
@@ -52,10 +56,10 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 
 	objectKey := fmt.Sprintf("base/%s%s", token.RandomHex(12), strings.ToLower(ext))
 
-	m, err := s.repo.Create(ctx, Meme{
+	m, err := s.repo.CreateWithinQuota(ctx, Meme{
 		UserID: userID, Title: title,
 		BaseImageURL: s.publicURL(objectKey),
-	})
+	}, allow)
 	if err != nil {
 		return UploadResponse{}, err
 	}
@@ -76,7 +80,7 @@ func (s *Service) PrepareUpload(ctx context.Context, userID, title, ext, content
 // ResultUpload mengembalikan presigned PUT URL untuk gambar hasil render
 // (canvas) milik meme <id>; complete kemudian menyimpan URL publiknya.
 func (s *Service) ResultUpload(ctx context.Context, userID, id string, size int64) (UploadResponse, error) {
-	if err := s.gate.CanCreate(ctx, userID); err != nil {
+	if _, err := s.gate.CanCreate(ctx, userID); err != nil {
 		return UploadResponse{}, err
 	}
 	if _, err := s.repo.GetByID(ctx, id, userID); err != nil {
@@ -104,32 +108,40 @@ func (s *Service) ResultUpload(ctx context.Context, userID, id string, size int6
 }
 
 func (s *Service) Complete(ctx context.Context, userID, id string) (Meme, error) {
-    if err := s.gate.CanCreate(ctx, userID); err != nil { return Meme{}, err }
-    if _, err := s.repo.GetByID(ctx, id, userID); err != nil { return Meme{}, err }
+	if _, err := s.gate.CanCreate(ctx, userID); err != nil {
+		return Meme{}, err
+	}
+	if _, err := s.repo.GetByID(ctx, id, userID); err != nil {
+		return Meme{}, err
+	}
 
-    key := fmt.Sprintf("result/%s.png", id)
-    drop := func() {
-        _, _ = s.s3.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &key})
-    }
+	key := fmt.Sprintf("result/%s.png", id)
+	drop := func() {
+		_, _ = s.s3.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: &s.bucket, Key: &key})
+	}
 
-    head, err := s.s3.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &key})
-    if err != nil { return Meme{}, ErrInvalidFile }
-    if aws.ToInt64(head.ContentLength) > maxResultSizeBytes {
-        drop()
-        return Meme{}, ErrFileTooLarge
-    }
+	head, err := s.s3.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &s.bucket, Key: &key})
+	if err != nil {
+		return Meme{}, ErrInvalidFile
+	}
+	if aws.ToInt64(head.ContentLength) > maxResultSizeBytes {
+		drop()
+		return Meme{}, ErrFileTooLarge
+	}
 
-    obj, err := s.s3.GetObject(ctx, &s3.GetObjectInput{
-        Bucket: &s.bucket, Key: &key, Range: aws.String("bytes=0-511"),
-    })
-    if err != nil { return Meme{}, ErrInvalidFile }
-    defer obj.Body.Close()
-    buf, _ := io.ReadAll(obj.Body)
-    if http.DetectContentType(buf) != "image/png" {
-        drop()
-        return Meme{}, ErrInvalidFile
-    }
-    return s.repo.SetResultURL(ctx, id, userID, s.publicURL(key))
+	obj, err := s.s3.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &s.bucket, Key: &key, Range: aws.String("bytes=0-511"),
+	})
+	if err != nil {
+		return Meme{}, ErrInvalidFile
+	}
+	defer obj.Body.Close()
+	buf, _ := io.ReadAll(obj.Body)
+	if http.DetectContentType(buf) != "image/png" {
+		drop()
+		return Meme{}, ErrInvalidFile
+	}
+	return s.repo.SetResultURL(ctx, id, userID, s.publicURL(key))
 }
 
 func (s *Service) List(ctx context.Context, userID string, limit, offset int32) (ListResponse, error) {

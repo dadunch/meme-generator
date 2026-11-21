@@ -18,7 +18,7 @@ func RegisterRoutes(mux *http.ServeMux, h *Handler, authMW func(http.Handler) ht
 
 	mux.Handle("GET /api/v1/subscription/status", authMW(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-        	w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Set("Cache-Control", "private, no-store")
 			h.Status(w, r)
 		})))
 	mux.Handle("POST /api/v1/subscription/checkout", authMW(http.HandlerFunc(h.Checkout)))
