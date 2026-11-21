@@ -15,6 +15,9 @@ import (
 type Handler struct {
 	service *Service
 }
+type resultUploadDTO struct {
+	Size int64 `json:"size"`
+}
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
@@ -59,7 +62,14 @@ func (h *Handler) ResultUpload(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
 		return
 	}
-	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"))
+
+	var dto resultUploadDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
+		return
+	}
+
+	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"), dto.Size)
 	if err != nil {
 		writeError(w, err)
 		return
