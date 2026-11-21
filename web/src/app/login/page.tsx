@@ -16,13 +16,6 @@ export default function LoginPage() {
   const router = useRouter();
   const login = useLogin();
 
- 
-  useEffect(() => {
-    if (document.cookie.includes("meme_access_token")) {
-      router.replace("/");
-    }
-  }, [router]);
-
   const form = useForm({
     defaultValues: { email: "", password: "" },
     onSubmit: async ({ value }) => {

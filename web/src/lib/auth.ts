@@ -64,9 +64,6 @@ export function useLogout() {
       }
     },
     onSettled: () => {
-      // Hapus cookie sisi client juga sebagai fallback
-      document.cookie = "meme_access_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT";
-      document.cookie = "meme_refresh_token=; path=/; max-age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT";
       qc.clear();
       window.location.href = "/login";
     },

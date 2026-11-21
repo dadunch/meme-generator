@@ -16,12 +16,6 @@ export default function RegisterPage() {
   const router = useRouter();
   const register = useRegister();
 
-  useEffect(() => {
-    if (document.cookie.includes("meme_access_token")) {
-      router.replace("/");
-    }
-  }, [router]);
-
   const form = useForm({
     defaultValues: { name: "", email: "", password: "" },
     onSubmit: async ({ value }) => {
