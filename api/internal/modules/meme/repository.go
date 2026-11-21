@@ -33,48 +33,6 @@ func (r *Repository) Create(ctx context.Context, m Meme) (Meme, error) {
 	return out, nil
 }
 
-// CreateWithinQuota: lock per user, hitung, lalu insert dalam SATU transaksi,
-// sehingga request paralel tidak bisa melewati kuota (TKT-109).
-func (r *Repository) CreateWithinQuota(ctx context.Context, m Meme, a Allowance) (Meme, error) {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return Meme{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, m.UserID); err != nil {
-		return Meme{}, fmt.Errorf("meme repository: lock gagal: %w", err)
-	}
-
-	if a.Max > 0 {
-		var n int
-		if err := tx.QueryRow(ctx,
-			`SELECT COUNT(*) FROM memes WHERE user_id = $1 AND created_at >= $2`,
-			m.UserID, a.Since).Scan(&n); err != nil {
-			return Meme{}, fmt.Errorf("meme repository: hitung kuota gagal: %w", err)
-		}
-		if n >= a.Max {
-			return Meme{}, ErrQuotaExceeded
-		}
-	}
-
-	var out Meme
-	err = tx.QueryRow(ctx, `
-		INSERT INTO memes (user_id, title, base_url, top_text, bottom_text, font_size)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at`,
-		m.UserID, m.Title, m.BaseImageURL, m.TopText, m.BottomText, m.FontSize,
-	).Scan(&out.ID, &out.UserID, &out.Title, &out.BaseImageURL, &out.ResultURL,
-		&out.TopText, &out.BottomText, &out.FontSize, &out.CreatedAt)
-	if err != nil {
-		return Meme{}, fmt.Errorf("meme repository: create gagal: %w", err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Meme{}, err
-	}
-	return out, nil
-}
-
 func (r *Repository) GetByID(ctx context.Context, id, userID string) (Meme, error) {
 	row := r.pool.QueryRow(ctx,
 		`SELECT id, user_id, title, base_url, result_url, top_text, bottom_text, font_size, created_at, updated_at

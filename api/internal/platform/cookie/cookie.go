@@ -14,7 +14,7 @@ func Set(w http.ResponseWriter, name, value string, maxAge int, secure bool) {
 		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
-		HttpOnly: true,
+		HttpOnly: true, 
 		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})

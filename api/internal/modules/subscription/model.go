@@ -43,12 +43,11 @@ type CheckoutResponse struct {
 }
 
 type SubscriptionStatus struct {
-	Subscribed bool      `json:"subscribed"`
-	Status     string    `json:"status,omitempty"`
-	PlanCode   string    `json:"planCode,omitempty"`
-	PlanName   string    `json:"planName,omitempty"`
-	EndsAt     *string   `json:"endsAt,omitempty"`
-	StartsAt   time.Time `json:"-"` // internal, dipakai gate kuota
-	MemesUsed  int32     `json:"memesUsed"`
-	MaxMemes   int32     `json:"maxMemes"`
+	Subscribed bool    `json:"subscribed"`
+	Status     string  `json:"status,omitempty"`
+	PlanCode   string  `json:"planCode,omitempty"`
+	PlanName   string  `json:"planName,omitempty"`
+	EndsAt     *string `json:"endsAt,omitempty"`
+	MemesUsed  int32   `json:"memesUsed"`
+	MaxMemes   int32   `json:"maxMemes"`
 }

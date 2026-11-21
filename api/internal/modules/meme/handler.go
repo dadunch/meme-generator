@@ -15,9 +15,6 @@ import (
 type Handler struct {
 	service *Service
 }
-type resultUploadDTO struct {
-	Size int64 `json:"size"`
-}
 
 func NewHandler(service *Service) *Handler {
 	return &Handler{service: service}
@@ -62,14 +59,7 @@ func (h *Handler) ResultUpload(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
 		return
 	}
-
-	var dto resultUploadDTO
-	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
-		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "invalid request body")
-		return
-	}
-
-	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"), dto.Size)
+	res, err := h.service.ResultUpload(r.Context(), userID, r.PathValue("id"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -84,7 +74,13 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		response.Error(w, http.StatusUnauthorized, response.CodeUnauthorized, "unauthorized")
 		return
 	}
-	m, err := h.service.Complete(r.Context(), userID, r.PathValue("id"))
+	id := r.PathValue("id")
+	var dto completeDTO
+	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil || dto.ResultURL == "" {
+		response.Error(w, http.StatusBadRequest, response.CodeInvalidRequestBody, "resultUrl wajib diisi")
+		return
+	}
+	m, err := h.service.Complete(r.Context(), userID, id, dto.ResultURL)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -129,8 +125,6 @@ func writeError(w http.ResponseWriter, err error) {
 		response.Error(w, http.StatusRequestEntityTooLarge, response.CodeUploadTooLarge, err.Error())
 	case errors.Is(err, ErrNotFound):
 		response.Error(w, http.StatusNotFound, response.CodeMemeNotFound, err.Error())
-	case errors.Is(err, ErrQuotaExceeded):
-		response.Error(w, http.StatusForbidden, response.CodeNotSubscribed, err.Error())
 	case errors.Is(err, ErrNotSubscribedGate):
 		response.Error(w, http.StatusForbidden, response.CodeNotSubscribed, ErrNotSubscribedGate.Error())
 	default:

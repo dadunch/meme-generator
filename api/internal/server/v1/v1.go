@@ -24,18 +24,32 @@ type subscriptionGate struct {
 	pool *pgxpool.Pool
 }
 
-func (g subscriptionGate) CanCreate(ctx context.Context, userID string) (meme.Allowance, error) {
+func (g subscriptionGate) CanCreate(ctx context.Context, userID string) error {
+	tx, err := g.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Kunci advisory berbasis user ID selama transaksi untuk mencegah race condition (TKT-109)
+	var locked bool
+	if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext($1))`, userID).Scan(&locked); err != nil {
+		return err
+	}
+
 	status, err := g.sub.Status(ctx, userID)
 	if err != nil {
-		return meme.Allowance{}, err
+		return err
 	}
 	if !status.Subscribed {
-		return meme.Allowance{}, meme.ErrNotSubscribedGate
+		return meme.ErrNotSubscribedGate
 	}
-	return meme.Allowance{
-		Max:   int(status.MaxMemes),
-		Since: status.StartsAt,
-	}, nil
+	if status.MaxMemes > 0 && status.MemesUsed >= status.MaxMemes {
+		return meme.ErrNotSubscribedGate
+	}
+
+	_ = tx.Commit(ctx)
+	return nil
 }
 
 func Mount(mux *http.ServeMux, pool *pgxpool.Pool, rdb *redis.Client, s3Client *s3.Client, tokens *token.Manager, cfg config.Config) {
